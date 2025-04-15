@@ -2,6 +2,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 import itertools
 from scipy.optimize import curve_fit
+from skneuromsi.sweep import ProcessingStrategyABC
+from scipy.signal import find_peaks
+
+### FUNCTIONS
 
 
 def compute_cost(model_data, exp_data):
@@ -16,7 +20,7 @@ def calculate_two_peaks_probability(visual_peaks_values):
         )
     )
 
-    probs_array = np.array([])
+    probs_array = np.array([], dtype=np.float16)
 
     for i in combinations:
         probs_array = np.append(probs_array, np.array(i).prod())
@@ -101,3 +105,57 @@ def plot_res_per_soa(result_list, position=15):
     fig.legend(handles, labels, loc="center right", borderaxespad=0.1)
     plt.subplots_adjust(right=0.935)
     plt.show()
+
+
+### CLASESS
+
+
+class TwoFlashesProcessingStrategy(ProcessingStrategyABC):
+    def map(self, result):
+        max_pos = result.stats.dimmax().positions
+        visual_activity = (
+            result.get_modes(include="visual")
+            .query(f"positions=={max_pos}")
+            .visual.values
+        )
+        peaks, peaks_props = find_peaks(
+            visual_activity,
+            height=0.15,
+            prominence=0.15,
+            distance=36 / 0.01,
+        )
+        if len(peaks) < 2:
+            p_two_flashes = 0
+        else:
+            p_two_flashes = calculate_two_peaks_probability(peaks_props["peak_heights"])
+        del result._nddata
+        return p_two_flashes * 100
+
+    def reduce(self, results, **kwargs):
+        return np.array(results, dtype=np.float16)
+
+
+class TwoFlashesProcessingStrategy_Explore(ProcessingStrategyABC):
+    def map(self, result):
+        max_pos = result.stats.dimmax().positions
+        visual_activity = (
+            result.get_modes(include="visual")
+            .query(f"positions=={max_pos}")
+            .visual.values
+        )
+        peaks, peaks_props = find_peaks(
+            visual_activity,
+            height=0.15,
+            prominence=0.15,
+            distance=36 / 0.01,
+        )
+        if len(peaks) < 2:
+            p_two_flashes = 0
+        else:
+            p_two_flashes = calculate_two_peaks_probability(peaks_props["peak_heights"])
+        return result, p_two_flashes * 100
+
+    def reduce(self, results, **kwargs):
+        results_list = [res[0] for res in results]
+        experiment_result = [res[1] for res in results]
+        return results_list, experiment_result
