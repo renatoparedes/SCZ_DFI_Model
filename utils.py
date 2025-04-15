@@ -24,9 +24,6 @@ def calculate_two_peaks_probability(visual_peaks_values):
     return probs_array.sum() / probs_array.size
 
 
-from scipy.optimize import curve_fit
-
-
 def sig(x, a, b, c, d):
     """Compute sigmoidal value for the given delay.
     Args:
