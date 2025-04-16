@@ -4,8 +4,15 @@ import itertools
 from scipy.optimize import curve_fit
 from skneuromsi.sweep import ProcessingStrategyABC
 from scipy.signal import find_peaks
+from findpeaks import findpeaks
 
 ### FUNCTIONS
+
+
+def adj_rmse(model_data, exp_data, k):
+    sse = np.sum(np.square(exp_data - model_data))
+    n = len(model_data)
+    return np.sqrt(sse / (n - k))
 
 
 def compute_cost(model_data, exp_data):
@@ -127,9 +134,11 @@ class TwoFlashesProcessingStrategy(ProcessingStrategyABC):
         if len(peaks) < 2:
             p_two_flashes = 0
         else:
-            p_two_flashes = calculate_two_peaks_probability(peaks_props["peak_heights"])
+            p_two_flashes = (
+                calculate_two_peaks_probability(peaks_props["peak_heights"]) * 100
+            )
         del result._nddata
-        return p_two_flashes * 100
+        return p_two_flashes
 
     def reduce(self, results, **kwargs):
         return np.array(results, dtype=np.float16)
@@ -138,6 +147,7 @@ class TwoFlashesProcessingStrategy(ProcessingStrategyABC):
 class TwoFlashesProcessingStrategy_Explore(ProcessingStrategyABC):
     def map(self, result):
         max_pos = result.stats.dimmax().positions
+        ## Calculate two peak probability
         visual_activity = (
             result.get_modes(include="visual")
             .query(f"positions=={max_pos}")
@@ -152,10 +162,36 @@ class TwoFlashesProcessingStrategy_Explore(ProcessingStrategyABC):
         if len(peaks) < 2:
             p_two_flashes = 0
         else:
-            p_two_flashes = calculate_two_peaks_probability(peaks_props["peak_heights"])
-        return result, p_two_flashes * 100
+            p_two_flashes = (
+                calculate_two_peaks_probability(peaks_props["peak_heights"]) * 100
+            )
+
+        ## Calculate causes
+        multi_activity = (
+            result.get_modes(include="multi")
+            .query(f"positions=={max_pos}")
+            .multi.values
+        )
+
+        multi_fp = findpeaks(method="topology", verbose=0, limit=0.5)
+        multi_fp_results = multi_fp.fit(multi_activity)
+        multi_peaks_df = multi_fp_results["df"].query(
+            "peak==True & valley==False & y>0.80"
+        )
+        if multi_peaks_df["y"].size < 1:
+            p_single_cause = 0
+        elif multi_peaks_df["y"].size == 1:
+            p_single_cause = multi_peaks_df["y"].values[0]
+        else:
+            p_single_cause = 1 - calculate_two_peaks_probability(
+                multi_peaks_df["y"].values
+            )
+
+        return result, p_two_flashes, p_single_cause
 
     def reduce(self, results, **kwargs):
         results_list = [res[0] for res in results]
         experiment_result = [res[1] for res in results]
-        return results_list, experiment_result
+        causes_result = [res[2] for res in results]
+
+        return results_list, experiment_result, causes_result
