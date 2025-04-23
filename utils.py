@@ -5,6 +5,7 @@ from scipy.optimize import curve_fit
 from skneuromsi.sweep import ProcessingStrategyABC
 from scipy.signal import find_peaks
 from findpeaks import findpeaks
+from matplotlib.ticker import ScalarFormatter
 
 ### FUNCTIONS
 
@@ -99,18 +100,73 @@ def sigfit(x, y):
 
 
 def plot_res_per_soa(result_list, position=15):
-    fig, axs = plt.subplots(3, 5, figsize=(16, 8), sharex=True, sharey=True)
+    fig, axs = plt.subplots(3, 5, figsize=(16, 8), sharex=True, sharey=True, dpi=600)
+    dashes_dict = {"auditory": "", "visual": "", "multi": (2, 2)}
     idx = -1
     for res in result_list:
         idx += 1
         row, col = idx // 5, idx % 5
-        sub_plot = res.plot.linet(position=15, ax=axs[row, col])
+        sub_plot = res.plot.linet(
+            position=position,
+            ax=axs[row, col],
+            style="modes",
+            dashes=dashes_dict,
+            palette=["gray", "black", "gray"],
+        )[0]
         sub_plot.get_legend().remove()
-        sub_plot.set_title("SOA " + str(int(res.run_params.soa)) + " ms")
+        sub_plot.set_title(
+            "SOA " + str(int(res.run_parameters.auditory_soa)) + " ms",
+            size=12,
+            weight="bold",
+        )
+        sub_plot.set_ylabel("Neural activation", size=11, weight="bold")
+        sub_plot.set_xlabel("Time (ms)", size=11, weight="bold")
+        sub_plot.set_xlim(0, 60000)
+        sub_plot.xaxis.set_major_formatter(ScalarFormatter(useMathText=False))
+        new_labels = [label.get_text()[:-2] for label in sub_plot.get_xticklabels()]
+        if new_labels:
+            new_labels[1] = "0"
+        sub_plot.set_xticklabels(new_labels)
+    handles, legend_labels = sub_plot.get_legend_handles_labels()
+    new_legend_labels = ["Auditory", "Visual", "Multisensory"]
+    fig.suptitle(None)
+    fig.legend(handles, new_legend_labels, loc="center right", borderaxespad=0.75)
+    plt.subplots_adjust(right=0.90)
+    plt.show()
 
-    handles, labels = sub_plot.get_legend_handles_labels()
-    fig.legend(handles, labels, loc="center right", borderaxespad=0.1)
-    plt.subplots_adjust(right=0.935)
+
+def plot_res_per_soa_small(result_list, position=15):
+    fig, axs = plt.subplots(1, 3, figsize=(14, 3), sharex=True, sharey=True, dpi=300)
+    dashes_dict = {"auditory": "", "visual": "", "multi": (2, 2)}
+    idx = -1
+    for res in result_list[0::7]:
+        idx += 1
+        col = idx
+        sub_plot = res.plot.linet(
+            position=position,
+            ax=axs[col],
+            style="modes",
+            dashes=dashes_dict,
+        )[0]
+        sub_plot.get_legend().remove()
+        sub_plot.set_title(
+            "SOA " + str(int(res.run_parameters.auditory_soa)) + " ms",
+            size=12,
+            weight="bold",
+        )
+        sub_plot.set_ylabel("Neural activation", size=11, weight="bold")
+        sub_plot.set_xlabel("Time (ms)", size=11, weight="bold")
+        sub_plot.set_xlim(0, 60000)
+        sub_plot.xaxis.set_major_formatter(ScalarFormatter(useMathText=False))
+        new_labels = [label.get_text()[:-2] for label in sub_plot.get_xticklabels()]
+        if new_labels:
+            new_labels[1] = "0"
+        sub_plot.set_xticklabels(new_labels)
+    handles, legend_labels = sub_plot.get_legend_handles_labels()
+    new_legend_labels = ["Auditory", "Visual", "Multisensory"]
+    fig.legend(handles, new_legend_labels, loc="center right", borderaxespad=0.2)
+    fig.suptitle(None)
+    plt.subplots_adjust(wspace=0.1)
     plt.show()
 
 
@@ -173,19 +229,22 @@ class TwoFlashesProcessingStrategy_Explore(ProcessingStrategyABC):
             .multi.values
         )
 
-        multi_fp = findpeaks(method="topology", verbose=0, limit=0.5)
-        multi_fp_results = multi_fp.fit(multi_activity)
-        multi_peaks_df = multi_fp_results["df"].query(
-            "peak==True & valley==False & y>0.80"
-        )
-        if multi_peaks_df["y"].size < 1:
-            p_single_cause = 0
-        elif multi_peaks_df["y"].size == 1:
-            p_single_cause = multi_peaks_df["y"].values[0]
-        else:
-            p_single_cause = 1 - calculate_two_peaks_probability(
-                multi_peaks_df["y"].values
+        if (multi_activity > 0.80).any():
+            multi_fp = findpeaks(method="topology", verbose=0, limit=0.8)
+            multi_fp_results = multi_fp.fit(multi_activity)
+            multi_peaks_df = multi_fp_results["df"].query(
+                "peak==True & valley==False & y>0.80"
             )
+            if multi_peaks_df["y"].size < 1:
+                p_single_cause = 0
+            elif multi_peaks_df["y"].size == 1:
+                p_single_cause = multi_peaks_df["y"].values[0]
+            else:
+                p_single_cause = 1 - calculate_two_peaks_probability(
+                    multi_peaks_df["y"].values
+                )
+        else:
+            p_single_cause = 0
 
         return result, p_two_flashes, p_single_cause
 
@@ -195,3 +254,47 @@ class TwoFlashesProcessingStrategy_Explore(ProcessingStrategyABC):
         causes_result = [res[2] for res in results]
 
         return results_list, experiment_result, causes_result
+
+
+class BeepsProcessingStrategy(ProcessingStrategyABC):
+    def map(self, result):
+        max_pos = result.stats.dimmax().positions
+        ## Calculate two peak probability
+        visual_activity = (
+            result.get_modes(include="visual")
+            .query(f"positions=={max_pos}")
+            .visual.values
+        )
+        peaks, _ = find_peaks(
+            visual_activity,
+            height=0.15,
+            prominence=0.15,
+            distance=36 / 0.01,
+        )
+        n_flashes = len(peaks)
+
+        ## Calculate causes
+        multi_activity = (
+            result.get_modes(include="multi")
+            .query(f"positions=={max_pos}")
+            .multi.values
+        )
+
+        if (multi_activity > 0.80).any():
+            multi_fp = findpeaks(method="topology", verbose=0, limit=0.8)
+            multi_fp_results = multi_fp.fit(multi_activity)
+            multi_peaks_df = multi_fp_results["df"].query(
+                "peak==True & valley==False & y>0.80"
+            )
+            n_causes = multi_peaks_df["y"].size
+        else:
+            n_causes = 0
+
+        del result._nddata
+        return n_flashes, n_causes
+
+    def reduce(self, results, **kwargs):
+        n_flashes_list = [res[0] for res in results]
+        n_causes_list = [res[1] for res in results]
+
+        return n_flashes_list, n_causes_list
