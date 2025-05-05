@@ -1,17 +1,10 @@
-from utils import calculate_two_peaks_probability
-
+from utils import TwoFlashesProcessingStrategy
 from skneuromsi.neural import Paredes2022
+from skneuromsi.sweep import ParameterSweep
 
 import numpy as np
 
 from scipy.optimize import differential_evolution
-
-from scipy.signal import find_peaks
-
-from skneuromsi.sweep import ParameterSweep
-
-from skneuromsi.sweep import ProcessingStrategyABC
-
 
 lspq_data = np.array(
     [
@@ -30,44 +23,9 @@ lspq_data = np.array(
         15.75893363,
         15.50112299,
         15.33600059,
-    ]
+    ],
+    dtype=np.float16
 )
-
-
-class TwoFlashesProcessingStrategy(ProcessingStrategyABC):
-
-    def map(self, result):
-
-        max_pos = result.stats.dimmax().positions
-
-        visual_activity = (
-            result.get_modes(include="visual")
-            .query(f"positions=={max_pos}")
-            .visual.values
-        )
-
-        peaks, peaks_props = find_peaks(
-            visual_activity,
-            height=0.15,
-            prominence=0.15,
-            distance=36 / 0.01,
-        )
-
-        if len(peaks) < 2:
-
-            p_two_flashes = 0
-
-        else:
-
-            p_two_flashes = calculate_two_peaks_probability(peaks_props["peak_heights"])
-
-        del result._nddata
-
-        return p_two_flashes * 100
-
-    def reduce(self, results, **kwargs):
-
-        return np.array(results, dtype=np.float16)
 
 
 def two_flashes_job(a_tau, v_tau, m_tau, cm_weight, fb_weight, ff_weight):
@@ -97,6 +55,7 @@ def two_flashes_job(a_tau, v_tau, m_tau, cm_weight, fb_weight, ff_weight):
             192.0,
             204.0,
         ]
+        ,dtype=np.float16
     )
 
     sp = ParameterSweep(
@@ -109,8 +68,8 @@ def two_flashes_job(a_tau, v_tau, m_tau, cm_weight, fb_weight, ff_weight):
     )
 
     res = sp.run(
-        auditory_intensity=2.325,
-        visual_intensity=1.45,
+        auditory_intensity=2.80,
+        visual_intensity=1.75,
         auditory_stim_n=2,
         visual_stim_n=1,
         auditory_duration=7,
@@ -144,10 +103,10 @@ def baseline_cost(theta):
     return cost
 
 
-bounds = [(6, 20), (6.25, 60), (6, 120), (0.001, 0.05), (0.001, 1), (0.001, 15)]
+bounds = [(6, 10), (6, 30), (6, 120), (0.0001, 0.05), (0.0001, 0.25), (0.0001, 1)]
 
 baseline_fit_res = differential_evolution(
-    baseline_cost, bounds, disp=True, updating="deferred", workers=28, polish=False
+    baseline_cost, bounds, disp=True, updating="deferred", workers=24, polish=False
 )
 
 print(baseline_fit_res)

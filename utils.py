@@ -172,7 +172,6 @@ def plot_res_per_soa_small(result_list, position=15):
 
 ### CLASESS
 
-
 class TwoFlashesProcessingStrategy(ProcessingStrategyABC):
     def map(self, result):
         max_pos = result.stats.dimmax().positions
@@ -193,6 +192,7 @@ class TwoFlashesProcessingStrategy(ProcessingStrategyABC):
             p_two_flashes = (
                 calculate_two_peaks_probability(peaks_props["peak_heights"]) * 100
             )
+        del visual_activity, peaks, peaks_props, max_pos
         del result._nddata
         return p_two_flashes
 
@@ -259,19 +259,21 @@ class TwoFlashesProcessingStrategy_Explore(ProcessingStrategyABC):
 class BeepsProcessingStrategy(ProcessingStrategyABC):
     def map(self, result):
         max_pos = result.stats.dimmax().positions
-        ## Calculate two peak probability
+        ## Calculate peaks
         visual_activity = (
             result.get_modes(include="visual")
             .query(f"positions=={max_pos}")
             .visual.values
         )
-        peaks, _ = find_peaks(
-            visual_activity,
-            height=0.15,
-            prominence=0.15,
-            distance=36 / 0.01,
-        )
-        n_flashes = len(peaks)
+        if (visual_activity > 0.15).any():
+            visual_fp = findpeaks(method="topology", verbose=0, limit=0.15)
+            visual_fp_results = visual_fp.fit(visual_activity)
+            visual_peaks_df = visual_fp_results["df"].query(
+                "peak==True & valley==False & y>0.15"
+            )
+            n_flashes = visual_peaks_df["y"].size
+        else:
+            n_flashes = 0
 
         ## Calculate causes
         multi_activity = (
